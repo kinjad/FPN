@@ -79,9 +79,12 @@ class FramePrediction_Network(object):
 
 
             #Conv layers
-            self.conv1 = slim.conv2d(activation_fn=tf.nn.elu, inputs=self.imageIn, num_outputs=128, kernel_size=[8, 8], stride=[4, 4], padding='VALID')
-            self.conv2 = slim.conv2d(activation_fn=tf.nn.elu, inputs=self.conv1, num_outputs=64, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
-            self.conv3 = slim.conv2d(activation_fn=tf.nn.elu, inputs=self.conv2, num_outputs=32, kernel_size=[2, 2], stride=[1, 1], padding='VALID')
+            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=96, kernel_size=[3, 3], stride=[4, 4], padding='VALID')
+            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=256, kernel_size=[5, 5], stride=[2, 2], padding='VALID')
+            self.conv3 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv2, num_outputs=384, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
+            self.conv4 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv3, num_outputs=256, kernel_size=[2, 2], stride=[1, 1], padding='VALID')
+
+
             #One FC layer
             hidden1 = slim.fully_connected(slim.flatten(self.conv3), h_size, activation_fn=tf.nn.elu)
             
@@ -90,9 +93,9 @@ class FramePrediction_Network(object):
             hidden4 = slim.fully_connected(hidden3, h_size / 8, activation_fn=tf.nn.elu)
 
             self.predicted_observation = slim.fully_connected(hidden4, 7056, activation_fn=tf.nn.relu)
-            self.predicted_reward = slim.fully_connected(hidden4, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
+            self.predicted_reward = slim.fully_connected(hidden4, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
 
-            self.predicted_done = slim.fully_connected(hidden4, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.01), biases_initializer=None)
+            self.predicted_done = slim.fully_connected(hidden4, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
             
 
             if scope != 'global_FPN':
@@ -293,9 +296,9 @@ class Worker(object):
         one_moment = np.vstack((one_past, one_action))
         done = False
         p_ob, p_r, p_d = sess.run([self.local_FP.predicted_observation, self.local_FP.predicted_reward, self.local_FP.predicted_done], feed_dict={self.local_FP.inputs:one_moment})
-        if p_d[0][0] > 0.1 or play_time >= 300:
+        if p_d[0][0] > 0.5 or play_time >= 300:
             done = True
-        p_r = p_r[0][0] if done == True else IMPOSSIBLE
+        p_r = p_r[0][0] 
         return p_ob, p_r, done
 
             
@@ -349,6 +352,7 @@ class Worker(object):
                         else:
                             #Instead of actually executing the action, we make several steps of predictions to find the best action move combo, now we just use one step
                             reward_holder = []
+                            value_holder = []
                             for ac in range(a_size):
                                 next_frame, rew , d = self.predict_frame(ac, len(experience_buffer))                                                               
 #                                for idx, image in enumerate(self.retro_buffer):
@@ -364,19 +368,19 @@ class Worker(object):
                                              self.local_AC.state_in[0]:rnn_state_pre[0],
                                              self.local_AC.state_in[1]:rnn_state_pre[1]}
                                 v, rnn_state_pre = sess.run([self.local_AC.value, self.local_AC.state_out], feed_dict=feed_dict)
-                                reward_holder.append(rew + v[0, 0])                            
-                            reward_holder = np.array(reward_holder)                              
-                            if sum(reward_holder == IMPOSSIBLE) == a_size:
+                                value_holder.append(rew + v[0, 0])                            
+                                reward_holder.append(rew)
+                            value_holder = np.array(value_holder)                              
+                            #print value_holder, reward_holder
+                            if sum(value_holder == IMPOSSIBLE) == a_size:
                                 a = np.random.randint(0, a_size)
                             else:
-                                p_dist = normalize_vector(reward_holder)
-                                print p_dist
+                                p_dist = normalize_vector(value_holder)
                                 a = np.random.choice(p_dist, p=p_dist)
                                 a = np.argmax(p_dist == a)
 
-                    e -= stepDrop
-#                    if e > eEnd:
-#                        e -= stepDrop                    
+
+
 
                     r = self.env.make_action(self.actions[a]) / 100.0
                     d = self.env.is_episode_finished()
@@ -449,9 +453,9 @@ class Worker(object):
                 # Periodically save gifs of episodes, model parameters, and summary statistics.
                 if episode_count % 5 == 0 and episode_count != 0:
                     if self.name == 'worker_0' and episode_count % 25 == 0:
-                        time_per_step = 0.05
+                        #time_per_step = 0.05
                         images = np.array(episode_frames)
-                        make_gif(images, './frames/image' + str(episode_count) + '.gif', duration=len(images) * time_per_step, true_image=True, salience=False)
+                        #make_gif(images, './frames/image' + str(episode_count) + '.gif', duration=len(images) * time_per_step, true_image=True, salience=False)
                             
                     if episode_count % 250 == 0 and self.name == 'worker_0':
                         saver.save(sess, self.model_path + '/model-' + str(episode_count) + '.cptk')
