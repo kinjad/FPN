@@ -23,7 +23,7 @@ class FramePrediction_Network(object):
             self.imageIn = tf.reshape(self.inputs, [-1, 9 * (retro_step + 1), 9, 32])
             
 
-            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=64, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
+            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=16, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
             self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
             
             hidden1 = slim.fully_connected(slim.flatten(self.conv2), h_size, activation_fn=tf.nn.elu)
@@ -62,21 +62,23 @@ with tf.device("/cpu:0"):
     trainer = tf.train.AdamOptimizer(learning_rate=1e-4)
     retro_step = 3
     FPN = FramePrediction_Network(h_size, retro_step, trainer, 'worker')
-    num_epochs = 1000
+    num_epochs = 250
     data_size = 1039
+    train_data_size = 800
+    test_data_size = data_size - 800
     data_path = 'frames/'
     sess.run(tf.global_variables_initializer())
 
 
 
     #read data 
-    past_history = []
+    past_history= []
     episode_next = []
     episode_reward = []
     episode_done = []
     print 'reading data'
     for data_index in range(data_size):
-        print 'reading ' + str(data_index) + ' file'
+        #print 'reading ' + str(data_index) + ' file'
         data_path_for_one_ep = data_path + 'episode_' + str(data_index) + '/'
         one_episode_buffer = []
         one_episode_action = []
@@ -121,15 +123,23 @@ with tf.device("/cpu:0"):
         episode_next.append(next_observations)
         episode_reward.append(rewards)
         episode_done.append(dones)
-               
 
+
+
+
+
+            
+
+    #Training
+    print "training..."
+               
     for epoch in range(num_epochs):
         epoch_loss = []
         epoch_ob_loss = []
         epoch_reward_loss = []
         epoch_done_loss = []
-        print "training on the " + str(epoch) + " epoch"
-        for data_index in range(data_size):            
+
+        for data_index in range(train_data_size):            
             #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
             #print 'training ' + str(data_index) + ' file'
             sudo_data_index = data_index
@@ -137,12 +147,12 @@ with tf.device("/cpu:0"):
 
             o_l, r_l, d_l, loss, _ = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss, FPN.apply_grads], feed_dict=feed_dict)
 
-            episode_buffer = past_history[data_index]
+            len_episode_buffer = len(past_history[sudo_data_index])
 
-            loss /= (len(episode_buffer) - retro_step)
-            o_l /= (len(episode_buffer) - retro_step)
-            r_l /= (len(episode_buffer) - retro_step)
-            d_l /= (len(episode_buffer) - retro_step)
+            loss /= (len_episode_buffer - retro_step)
+            o_l /= (len_episode_buffer - retro_step)
+            r_l /= (len_episode_buffer - retro_step)
+            d_l /= (len_episode_buffer - retro_step)
 
             epoch_loss.append(loss)
             epoch_ob_loss.append(o_l)
@@ -154,6 +164,7 @@ with tf.device("/cpu:0"):
             o_l = np.mean(epoch_ob_loss)
             r_l = np.mean(epoch_reward_loss)
             d_l = np.mean(epoch_done_loss)
+            print "training on the " + str(epoch) + " epoch and the error is :" 
             print l, o_l, r_l, d_l
             summary.value.add(tag='Losses/Prediction Loss', simple_value=float(l))
             summary.value.add(tag='Losses/Observation Loss', simple_value=float(o_l))
@@ -162,6 +173,46 @@ with tf.device("/cpu:0"):
             summary_writer = tf.summary.FileWriter("train_FPN")
             summary_writer.add_summary(summary, epoch)
             summary_writer.flush()
+
+
+    #validate
+    print "Testing"
+
+    epoch_loss = []
+    epoch_ob_loss = []
+    epoch_reward_loss = []
+    epoch_done_loss = []
+
+    for data_index in range(test_data_size):            
+        #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
+        #print 'training ' + str(data_index) + ' file'
+        sudo_data_index = data_index + train_data_size
+        feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index]}
+
+        o_l, r_l, d_l, loss = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss], feed_dict=feed_dict)
+
+        len_episode_buffer = len(past_history[sudo_data_index])
+
+        loss /= (len_episode_buffer - retro_step)
+        o_l /= (len_episode_buffer - retro_step)
+        r_l /= (len_episode_buffer - retro_step)
+        d_l /= (len_episode_buffer - retro_step)
+
+        print "test on the " + str(data_index) + " file and the error is :" 
+        print loss, o_l, r_l, d_l
+        epoch_loss.append(loss)
+        epoch_ob_loss.append(o_l)
+        epoch_reward_loss.append(r_l)
+        epoch_done_loss.append(d_l)
+
+    l = np.mean(epoch_loss)
+    o_l = np.mean(epoch_ob_loss)
+    r_l = np.mean(epoch_reward_loss)
+    d_l = np.mean(epoch_done_loss)
+
+    print "final error is: " 
+print l, o_l, r_l, d_l
+
 
 
 
