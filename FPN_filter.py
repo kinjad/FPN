@@ -63,7 +63,7 @@ with tf.device("/cpu:0"):
     retro_step = 3
     FPN = FramePrediction_Network(h_size, retro_step, trainer, 'worker')
     num_epochs = 1000
-    data_size = 1040
+    data_size = 1039
     data_path = 'frames/'
     sess.run(tf.global_variables_initializer())
 
@@ -128,9 +128,10 @@ with tf.device("/cpu:0"):
         epoch_ob_loss = []
         epoch_reward_loss = []
         epoch_done_loss = []
+        print "training on the " + str(epoch) + " epoch"
         for data_index in range(data_size):            
             #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
-            print 'training ' + str(data_index) + ' file'
+            #print 'training ' + str(data_index) + ' file'
             sudo_data_index = data_index
             feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index]}
 
