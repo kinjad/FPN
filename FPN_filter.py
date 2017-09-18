@@ -20,11 +20,11 @@ class FramePrediction_Network(object):
     def __init__(self, h_size, retro_step, trainer, scope):
         with tf.variable_scope(scope):
             self.inputs = tf.placeholder(tf.float32)
-            self.imageIn = tf.reshape(self.inputs, [-1, 84 * (retro_step + 1), 84, 1])
+            self.imageIn = tf.reshape(self.inputs, [-1, 9 * (retro_step + 1), 9, 32])
             
 
-            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=64, kernel_size=[8, 8], stride=[4, 4], padding='VALID')
-            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
+            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=64, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
+            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
             
             hidden1 = slim.fully_connected(slim.flatten(self.conv2), h_size, activation_fn=tf.nn.elu)
             
@@ -32,7 +32,7 @@ class FramePrediction_Network(object):
 #            hidden3 = slim.fully_connected(hidden2, h_size / 4, activation_fn=tf.nn.elu)
 #            hidden4 = slim.fully_connected(hidden3, h_size / 8, activation_fn=tf.nn.elu)
 
-            self.predicted_observation = slim.fully_connected(hidden1, 7056, activation_fn=tf.nn.relu)
+            self.predicted_observation = slim.fully_connected(hidden1, 9 * 9 * 32, activation_fn=tf.nn.relu)
             self.predicted_reward = slim.fully_connected(hidden1, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
 
             self.predicted_done = slim.fully_connected(hidden1, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
@@ -63,7 +63,7 @@ with tf.device("/cpu:0"):
     retro_step = 3
     FPN = FramePrediction_Network(h_size, retro_step, trainer, 'worker')
     num_epochs = 1000
-    data_size = 4078
+    data_size = 1040
     data_path = 'frames/'
     sess.run(tf.global_variables_initializer())
 
@@ -131,7 +131,7 @@ with tf.device("/cpu:0"):
         for data_index in range(data_size):            
             #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
             print 'training ' + str(data_index) + ' file'
-            sudo_data_index = data_index - 3800
+            sudo_data_index = data_index
             feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index]}
 
             o_l, r_l, d_l, loss, _ = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss, FPN.apply_grads], feed_dict=feed_dict)
