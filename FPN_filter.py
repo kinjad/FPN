@@ -23,19 +23,19 @@ class FramePrediction_Network(object):
             self.imageIn = tf.reshape(self.inputs, [-1, 9 * (retro_step + 1), 9, 32])
             
 
-            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=16, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
-            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
+#            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=16, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
+#            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
             
-            hidden1 = slim.fully_connected(slim.flatten(self.conv2), h_size, activation_fn=tf.nn.elu)
+#            hidden1 = slim.fully_connected(slim.flatten(self.conv2), h_size, activation_fn=tf.nn.elu)
             
 #            hidden2 = slim.fully_connected(hidden1, h_size / 2, activation_fn=tf.nn.elu)
 #            hidden3 = slim.fully_connected(hidden2, h_size / 4, activation_fn=tf.nn.elu)
 #            hidden4 = slim.fully_connected(hidden3, h_size / 8, activation_fn=tf.nn.elu)
 
-            self.predicted_observation = slim.fully_connected(hidden1, 9 * 9 * 32, activation_fn=tf.nn.relu)
-            self.predicted_reward = slim.fully_connected(hidden1, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
+            self.predicted_observation = slim.fully_connected(self.imageIn, 9 * 9 * 32, activation_fn=tf.nn.relu)
+            self.predicted_reward = slim.fully_connected(self.imageIn, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
 
-            self.predicted_done = slim.fully_connected(hidden1, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
+            self.predicted_done = slim.fully_connected(self.imageIn, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
             
             #self.true_observation = tf.placeholder(shape=[None, 32], dtype=tf.float32)
             self.true_observation = tf.placeholder(dtype=tf.float32)
@@ -116,6 +116,10 @@ with tf.device("/cpu:0"):
             one_moment = np.vstack((one_past, one_action))
             one_past_history.append(one_moment)
         next_observations = np.array([np.array(one_episode_buffer[j]).flatten() for j in range(retro_step, len(one_episode_buffer))])
+
+        next_observations = np.array([np.array(one_episode_buffer[j]).flatten() for j in range(retro_step - 1, len(one_episode_buffer) - 1)])
+
+
         rewards = np.vstack(one_episode_reward[retro_step - 1 : -1])
         dones = np.vstack(one_episode_done[retro_step - 1 : -1])
         one_past_history = np.array(one_past_history)
