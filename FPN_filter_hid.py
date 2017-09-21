@@ -226,44 +226,41 @@ with tf.device("/gpu:0"):
             summary_writer.add_summary(summary, epoch)
             summary_writer.flush()
 
+            epoch_loss = []
+            epoch_ob_loss = []
+            epoch_reward_loss = []
+            epoch_done_loss = []
 
-    #validate
-    print "Testing"
+            for data_index in range(test_data_size):            
+                #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
+                #print 'training ' + str(data_index) + ' file'
+                sudo_data_index = data_index + train_data_size
+                feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index]}
 
-    epoch_loss = []
-    epoch_ob_loss = []
-    epoch_reward_loss = []
-    epoch_done_loss = []
+                o_l, r_l, d_l, loss = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss], feed_dict=feed_dict)
 
-    for data_index in range(test_data_size):            
-        #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
-        #print 'training ' + str(data_index) + ' file'
-        sudo_data_index = data_index + train_data_size
-        feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index]}
+                len_episode_buffer = len(past_history[sudo_data_index])
 
-        o_l, r_l, d_l, loss = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss], feed_dict=feed_dict)
+                loss /= (len_episode_buffer - retro_step)
+                o_l /= (len_episode_buffer - retro_step)
+                r_l /= (len_episode_buffer - retro_step)
+                d_l /= (len_episode_buffer - retro_step)
+                epoch_loss.append(loss)
+                epoch_ob_loss.append(o_l)
+                epoch_reward_loss.append(r_l)
+                epoch_done_loss.append(d_l)
 
-        len_episode_buffer = len(past_history[sudo_data_index])
+            l = np.mean(epoch_loss)
+            o_l = np.mean(epoch_ob_loss)
+            r_l = np.mean(epoch_reward_loss)
+            d_l = np.mean(epoch_done_loss)
 
-        loss /= (len_episode_buffer - retro_step)
-        o_l /= (len_episode_buffer - retro_step)
-        r_l /= (len_episode_buffer - retro_step)
-        d_l /= (len_episode_buffer - retro_step)
+            print "Validate error is: " 
+            print l, o_l, r_l, d_l
 
-        #print "test on the " + str(data_index) + " file and the error is :" 
-        #print loss, o_l, r_l, d_l
-        epoch_loss.append(loss)
-        epoch_ob_loss.append(o_l)
-        epoch_reward_loss.append(r_l)
-        epoch_done_loss.append(d_l)
 
-    l = np.mean(epoch_loss)
-    o_l = np.mean(epoch_ob_loss)
-    r_l = np.mean(epoch_reward_loss)
-    d_l = np.mean(epoch_done_loss)
 
-    print "final error is: " 
-print l, o_l, r_l, d_l
+
 
 
 
