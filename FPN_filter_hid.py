@@ -20,22 +20,43 @@ class FramePrediction_Network(object):
     def __init__(self, h_size, retro_step, trainer, scope):
         with tf.variable_scope(scope):
             self.inputs = tf.placeholder(tf.float32)
-            self.imageIn = tf.reshape(self.inputs, [-1, 9 * (retro_step + 1), 9, 32])
+            #self.imageIn = tf.reshape(self.inputs, [-1, 9 * (retro_step + 1), 9, 32])
+            #self.imageIn = tf.reshape(self.inputs, [-1, 9, 9, 32])
+            self.imageIn = tf.reshape(self.inputs, [-1, (retro_step + 1) * 16, 16, 1])
             
 
-#            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=16, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
-#            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
+            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=32, kernel_size=[3, 3], stride=[2, 2], padding='SAME')
+            print "conv1 shape, ", self.conv1.get_shape()
+            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=16, kernel_size=[3, 3], stride=[1, 1], padding='SAME')
+            print "conv2 shape, ", self.conv2.get_shape()
+
+#            self.conv3 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv2, num_outputs=64, kernel_size=[2, 2], stride=[1, 1], padding='SAME')
+#            self.conv4 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv3, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='SAME')
+#            self.conv5 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv4, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='SAME')
+#            self.conv6 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv5, num_outputs=16, kernel_size=[3, 3], stride=[1, 1], padding='SAME')
+#            self.conv7 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv6, num_outputs=16, kernel_size=[3, 3], stride=[1, 1], padding='SAME')
+
+
+
+
             
 #            hidden1 = slim.fully_connected(slim.flatten(self.conv2), h_size, activation_fn=tf.nn.elu)
+
+            hidden1 = slim.fully_connected(slim.flatten(self.conv2), h_size * 8, activation_fn=tf.nn.elu)
+
             
-#            hidden2 = slim.fully_connected(hidden1, h_size / 2, activation_fn=tf.nn.elu)
-#            hidden3 = slim.fully_connected(hidden2, h_size / 4, activation_fn=tf.nn.elu)
+            hidden2 = slim.fully_connected(hidden1, h_size * 4, activation_fn=tf.nn.elu)
+
+            hidden3 = slim.fully_connected(hidden2, h_size * 2, activation_fn=tf.nn.elu)
 #            hidden4 = slim.fully_connected(hidden3, h_size / 8, activation_fn=tf.nn.elu)
 
-            self.predicted_observation = slim.fully_connected(self.imageIn, 9 * 9 * 32, activation_fn=tf.nn.relu)
-            self.predicted_reward = slim.fully_connected(self.imageIn, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
+            self.predicted_observation = slim.fully_connected(hidden3, 256, activation_fn=None, weights_initializer=normalized_columns_initializer(0.1))
+            self.predicted_reward = slim.fully_connected(hidden3, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
 
-            self.predicted_done = slim.fully_connected(self.imageIn, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
+            self.predicted_done = slim.fully_connected(hidden3, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
+
+ 
+
             
             #self.true_observation = tf.placeholder(shape=[None, 32], dtype=tf.float32)
             self.true_observation = tf.placeholder(dtype=tf.float32)
@@ -57,16 +78,20 @@ class FramePrediction_Network(object):
 
 h_size = 256
 
-with tf.device("/cpu:0"):
-    sess = tf.Session()
-    trainer = tf.train.AdamOptimizer(learning_rate=1e-4)
+
+config = tf.ConfigProto(allow_soft_placement = True)
+sess = tf.Session(config = config)
+
+with tf.device("/gpu:0"):
+
+    trainer = tf.train.AdamOptimizer(learning_rate=5e-5)
     retro_step = 3
     FPN = FramePrediction_Network(h_size, retro_step, trainer, 'worker')
-    num_epochs = 250
+    num_epochs = 100
     data_size = 1039
     train_data_size = 800
     test_data_size = data_size - 800
-    data_path = 'frames/'
+    data_path = '../frames/'
     sess.run(tf.global_variables_initializer())
 
 
@@ -84,16 +109,11 @@ with tf.device("/cpu:0"):
         one_episode_action = []
         one_episode_reward = []
         one_episode_done = []
-        for image_file in os.listdir(data_path_for_one_ep):
-            if image_file.find('.txt') != -1 or image_file.find('.DS_Store') != -1:
-                continue
-            im = np.load(data_path_for_one_ep + image_file)
-            one_episode_buffer.append(im)
-        if len(one_episode_buffer) <= retro_step:
-            continue
+
         action_file = data_path_for_one_ep + 'action.txt'
         reward_file = data_path_for_one_ep + 'reward.txt'
         done_file = data_path_for_one_ep + 'done.txt'
+
         f = open(action_file, 'r')
         text = f.readlines()
         for line in text:
@@ -108,21 +128,41 @@ with tf.device("/cpu:0"):
         text = f.readlines()
         for line in text:
             one_episode_done.append(bool(line.strip()))
+        
+        episode_len = len(one_episode_action)
+
+        
+        for image_index in range(episode_len):
+            file_path = data_path_for_one_ep + 'image_' + str(image_index) + '.npy'
+            im = np.load(file_path)
+            one_episode_buffer.append(im)
+        if len(one_episode_buffer) <= retro_step:
+            continue
+
         one_past_history = []
         for i in range(retro_step, len(one_episode_buffer)):
             one_past = np.array([np.array(one_episode_buffer[j]).flatten() for j in range(i - retro_step, i)])
+            #one_past = np.array(one_episode_buffer[i - 1])
+            #print out the difference between each adjacent frame
+            #print np.linalg.norm(np.array(one_episode_buffer[i - 1]) - np.array(one_episode_buffer[i - 2]))
+
             one_action = one_episode_action[i - 1 : i]
             one_action = np.full(one_past[0].shape, one_action)
+            #one_action = np.full(one_past.shape, one_action)
             one_moment = np.vstack((one_past, one_action))
+
             one_past_history.append(one_moment)
+            #one_past_history.append(one_past)
         next_observations = np.array([np.array(one_episode_buffer[j]).flatten() for j in range(retro_step, len(one_episode_buffer))])
 
-        next_observations = np.array([np.array(one_episode_buffer[j]).flatten() for j in range(retro_step - 1, len(one_episode_buffer) - 1)])
+        #next_observations = np.array([np.array(one_episode_buffer[j]).flatten() for j in range(retro_step - 1, len(one_episode_buffer) - 1)])
 
 
         rewards = np.vstack(one_episode_reward[retro_step - 1 : -1])
         dones = np.vstack(one_episode_done[retro_step - 1 : -1])
         one_past_history = np.array(one_past_history)
+
+
         past_history.append(one_past_history)
         episode_next.append(next_observations)
         episode_reward.append(rewards)
@@ -131,8 +171,16 @@ with tf.device("/cpu:0"):
 
 
 
+    #shuffle data
 
-            
+    indices = [i for i in range(len(past_history))]
+    np.random.shuffle(indices)
+    past_history = [past_history[i] for i in indices]
+    episode_next = [episode_next[i] for i in indices]
+    episode_reward = [episode_reward[i] for i in indices]
+    episode_done = [episode_done[i] for i in indices]
+
+
 
     #Training
     print "training..."
@@ -202,8 +250,8 @@ with tf.device("/cpu:0"):
         r_l /= (len_episode_buffer - retro_step)
         d_l /= (len_episode_buffer - retro_step)
 
-        print "test on the " + str(data_index) + " file and the error is :" 
-        print loss, o_l, r_l, d_l
+        #print "test on the " + str(data_index) + " file and the error is :" 
+        #print loss, o_l, r_l, d_l
         epoch_loss.append(loss)
         epoch_ob_loss.append(o_l)
         epoch_reward_loss.append(r_l)
