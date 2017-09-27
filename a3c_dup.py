@@ -68,23 +68,23 @@ class FramePrediction_Network(object):
         with tf.variable_scope(scope):
             #self.inputs = tf.placeholder(tf.float32, [None, (retro_step + 1) * 32])
             self.inputs = tf.placeholder(tf.float32)
-            self.imageIn = tf.reshape(self.inputs, [-1, (retro_step + 1) * 4, 8, 1])
+            self.imageIn = tf.reshape(self.inputs, [-1, (retro_step + 1) * 16, 16, 1])
 
 
             #Conv layers
-            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=64, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
-            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
-            self.conv3 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv2, num_outputs=16, kernel_size=[2, 2], stride=[1, 1], padding='VALID')
+#            self.conv1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.imageIn, num_outputs=64, kernel_size=[4, 4], stride=[2, 2], padding='VALID')
+#            self.conv2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv1, num_outputs=32, kernel_size=[3, 3], stride=[1, 1], padding='VALID')
+#            self.conv3 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv2, num_outputs=16, kernel_size=[2, 2], stride=[1, 1], padding='VALID')
 
 
             #One FC layer
-            hidden1 = slim.fully_connected(slim.flatten(self.conv3), h_size, activation_fn=tf.nn.elu)
+            hidden1 = slim.fully_connected(slim.flatten(self.imagIn), h_size * 16, activation_fn=tf.nn.elu)
             
-            hidden2 = slim.fully_connected(hidden1, h_size / 2, activation_fn=tf.nn.elu)
+            hidden2 = slim.fully_connected(hidden1, h_size * 12, activation_fn=tf.nn.elu)
             #hidden3 = slim.fully_connected(hidden2, h_size / 4, activation_fn=tf.nn.elu)
             #hidden4 = slim.fully_connected(hidden3, h_size / 8, activation_fn=tf.nn.elu)
 
-            self.predicted_observation = slim.fully_connected(hidden2, 32, activation_fn=tf.nn.relu)
+            self.predicted_observation = slim.fully_connected(hidden2, 256, activation_fn=tf.nn.relu)
             self.predicted_reward = slim.fully_connected(hidden2, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
 
             self.predicted_done = slim.fully_connected(hidden2, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
@@ -122,7 +122,7 @@ class AC_Network():
             self.conv2 = slim.conv2d(activation_fn=tf.nn.elu,
                inputs=self.conv1,num_outputs=32,
                                      kernel_size=[4,4],stride=[2,2],padding='VALID')
-            hidden = slim.fully_connected(slim.flatten(self.conv2),256,activation_fn=tf.nn.elu)
+            hidden = slim.fully_connected(slim.flatten(self.conv2),256,activation_fn=tf.nn.elu, name='hidden')
             
             #Recurrent network for temporal dependencies
             lstm_cell = tf.contrib.rnn.BasicLSTMCell(256,state_is_tuple=True)
