@@ -78,13 +78,13 @@ class FramePrediction_Network(object):
 
 
             #One FC layer
-            hidden1 = slim.fully_connected(slim.flatten(self.imagIn), h_size * 16, activation_fn=tf.nn.elu)
+            hidden1 = slim.fully_connected(slim.flatten(self.imageIn), h_size * 16, activation_fn=tf.nn.elu)
             
             hidden2 = slim.fully_connected(hidden1, h_size * 12, activation_fn=tf.nn.elu)
             #hidden3 = slim.fully_connected(hidden2, h_size / 4, activation_fn=tf.nn.elu)
             #hidden4 = slim.fully_connected(hidden3, h_size / 8, activation_fn=tf.nn.elu)
 
-            self.predicted_observation = slim.fully_connected(hidden2, 256, activation_fn=tf.nn.relu)
+            self.predicted_observation = slim.fully_connected(hidden2, 256, activation_fn=None)
             self.predicted_reward = slim.fully_connected(hidden2, 1, activation_fn=None, weights_initializer=normalized_columns_initializer(1.0), biases_initializer=None)
 
             self.predicted_done = slim.fully_connected(hidden2, 1, activation_fn=tf.nn.sigmoid, weights_initializer=normalized_columns_initializer(0.1), biases_initializer=None)
@@ -122,7 +122,7 @@ class AC_Network():
             self.conv2 = slim.conv2d(activation_fn=tf.nn.elu,
                inputs=self.conv1,num_outputs=32,
                                      kernel_size=[4,4],stride=[2,2],padding='VALID')
-            hidden = slim.fully_connected(slim.flatten(self.conv2),256,activation_fn=tf.nn.elu, name='hidden')
+            hidden = slim.fully_connected(slim.flatten(self.conv2),256,activation_fn=tf.nn.elu, scope='hidden')
             
             #Recurrent network for temporal dependencies
             lstm_cell = tf.contrib.rnn.BasicLSTMCell(256,state_is_tuple=True)
@@ -140,17 +140,17 @@ class AC_Network():
                 time_major=False)
             lstm_c, lstm_h = lstm_state
             self.state_out = (lstm_c[:1, :], lstm_h[:1, :])
-            rnn_out = tf.reshape(lstm_outputs, [-1, 256])
+            self.rnn_out = tf.reshape(lstm_outputs, [-1, 256])
             
             #Output layers for policy and value estimations
-            self.policy = slim.fully_connected(rnn_out,a_size,
+            self.policy = slim.fully_connected(self.rnn_out,a_size,
                activation_fn=tf.nn.softmax,
                                                weights_initializer=normalized_columns_initializer(0.01),
                 biases_initializer=None)
-            self.value = slim.fully_connected(rnn_out,1,
+            self.value = slim.fully_connected(self.rnn_out,1,
                activation_fn=None,
                                               weights_initializer=normalized_columns_initializer(1.0),
-                biases_initializer=None)
+                                              biases_initializer=None, scope='Value')
             
             #Only the worker network need ops for loss functions and gradient updating.
             if scope != 'global':
@@ -287,7 +287,7 @@ class Worker():
         rewards = np.vstack(rollout[retro_step - 1: -1, 2])
         dones = np.vstack(rollout[retro_step - 1: -1, 3])
         past_history = np.array(past_history)
-        feed_dict = {self.local_FP.conv2:past_history, self.local_FP.true_observation:next_observations, self.local_FP.true_reward:rewards, self.local_FP.true_done:dones}
+        feed_dict = {self.local_FP.inputs:past_history, self.local_FP.true_observation:next_observations, self.local_FP.true_reward:rewards, self.local_FP.true_done:dones}
         o_l, r_l, d_l, loss, _ = sess.run([self.local_FP.observation_loss, self.local_FP.reward_loss, self.local_FP.done_loss, self.local_FP.loss, self.local_FP.apply_grads], feed_dict=feed_dict)
         
         return loss / (len(rollout) - retro_step), o_l / (len(rollout) - retro_step), r_l / (len(rollout) - retro_step), d_l / (len(rollout) - retro_step)
@@ -298,9 +298,10 @@ class Worker():
     def predict_frame(self, action, play_time):
         one_past = np.array(self.retro_buffer)
         one_action = np.full(one_past[0].shape, action)
+        one_past = np.vstack(one_past)
         one_moment = np.vstack((one_past, one_action))
         done = False
-        p_ob, p_r, p_d = sess.run([self.local_FP.predicted_observation, self.local_FP.predicted_reward, self.local_FP.predicted_done], feed_dict={self.local_FP.conv2:one_moment})
+        p_ob, p_r, p_d = sess.run([self.local_FP.predicted_observation, self.local_FP.predicted_reward, self.local_FP.predicted_done], feed_dict={self.local_FP.inputs:one_moment})
         if p_d[0][0] > 0.5 or play_time >= 300:
             done = True
         p_r = p_r[0][0] 
@@ -308,6 +309,12 @@ class Worker():
 
 
 
+    def get_Value(self, sess, next_rnn_feature, scope):
+        value_weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope + '/Value')
+        weights = np.transpose(sess.run(value_weights[0]))
+        next_rnn_feature = next_rnn_feature
+        value = np.inner(weights, next_rnn_feature)
+        return value
 
 
 
@@ -335,7 +342,7 @@ class Worker():
                 self.batch_rnn_state = rnn_state
                 while self.env.is_episode_finished() == False:
                     #Take an action using probabilities from policy network output.
-                    a_dist,v,rnn_state, s_filtered = sess.run([self.local_AC.policy,self.local_AC.value,self.local_AC.state_out, self.local_AC.conv2], feed_dict={self.local_AC.inputs:[s],
+                    a_dist,v,rnn_state, rnn_out = sess.run([self.local_AC.policy,self.local_AC.value,self.local_AC.state_out, self.local_AC.rnn_out], feed_dict={self.local_AC.inputs:[s],
                                                                                                                                  self.local_AC.state_in[0]:rnn_state[0],
                                                                                                                                  self.local_AC.state_in[1]:rnn_state[1]})
                     rnn_state_pre = rnn_state
@@ -350,12 +357,10 @@ class Worker():
                         reward_holder = []
                         value_holder = []
                         for ac in range(self.a_size):
-                            next_frame_feature, rew, d = self.predict_frame(ac, len(experience_buffer))
-                            feed_dict = {self.local_AC.conv2:next_frame_feature,
-                                         self.local_AC.state_in[0]:rnn_state_pre[0],
-                                         self.local_AC.state_in[1]:rnn_state_pre[1]}
-                            v = sess.run(self.local_AC.value, feed_dict=feed_dict)
-                            value_holder.append(rew + v[0, 0])
+                            next_rnn_feature, rew, d = self.predict_frame(ac, len(experience_buffer))
+
+                            v_pre = self.get_Value(sess, next_rnn_feature, self.name)
+                            value_holder.append(rew + v_pre[0, 0])
                             reward_holder.append(rew)
                         value_holder = np.array(value_holder)
                         p_dist = normalize_vector(value_holder)
@@ -372,15 +377,15 @@ class Worker():
                         s1 = s
                         
                     episode_buffer.append([s,a,r,s1,d,v[0,0]])
-                    experience_buffer.append([s_filtered, a, r, d])
+                    experience_buffer.append([rnn_out, a, r, d])
                     episode_values.append(v[0,0])
 
 
                     if len(self.retro_buffer) < self.retro_step:
-                        self.retro_buffer.append(s)
+                        self.retro_buffer.append(rnn_out)
                     else:
                         self.retro_buffer.pop(0)
-                        self.retro_buffer.append(s)
+                        self.retro_buffer.append(rnn_out)
 
                     episode_reward += r
                     s = s1                    
