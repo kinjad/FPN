@@ -103,6 +103,21 @@ class FramePrediction_Network(object):
             self.apply_grads = trainer.apply_gradients(zip(grads, global_vars))
 
 
+
+
+
+
+def DAD(history_obs, next_obs, reward, done, predicted_obs):
+    history_obs.pop(0)
+    for i in range(len(history_obs)):
+        history_obs[i][-2] = predicted_obs[i]
+    next_obs.pop(0)
+    done.pop(0)
+    predicted_done.pop(0)
+    return history_obs, next_obs, reward, done
+
+
+
 h_size = 256
 
 
@@ -119,6 +134,7 @@ with tf.device("/gpu:0"):
     train_data_size = 3600
     buff = 1000
     test_data_size = 400
+    pred_step = 2
     data_path = 'PongFF/'
     sess.run(tf.global_variables_initializer())
 
@@ -244,24 +260,40 @@ with tf.device("/gpu:0"):
             #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
             #print 'training ' + str(data_index) + ' file'
             sudo_data_index = data_index
-            feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index], FPN.state_in[0]:batch_rnn_state[0], FPN.state_in[1]:batch_rnn_state[1]}
 
-            o_l, r_l, d_l, loss, batch_rnn_state, _ = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss, FPN.state_out, FPN.apply_grads], feed_dict=feed_dict)
-
-
-            len_episode_buffer = len(past_history[sudo_data_index])
-
-
-            loss /= len_episode_buffer 
-            o_l /= len_episode_buffer
-            r_l /= len_episode_buffer
-            d_l /= len_episode_buffer
+            history_container = past_history[sudo_data_index]
+            next_container = episode_next[sudo_data_index]
+            reward_container = episode_reward[sudo_data_index]
+            done_container = episode_done[sudo_data_index]
 
 
-            epoch_loss.append(loss)
-            epoch_ob_loss.append(o_l)
-            epoch_reward_loss.append(r_l)
-            epoch_done_loss.append(d_l)
+            acc_loss = 0
+            acc_o_l = 0
+            acc_r_l = 0
+            acc_d_l = 0
+
+            for j in range(pred_step):
+
+                feed_dict = {FPN.inputs:hisotry_container, FPN.true_observation:next_container, FPN.true_reward:reward_container, FPN.true_done:done_container, FPN.state_in[0]:batch_rnn_state[0], FPN.state_in[1]:batch_rnn_state[1]}
+
+                po, o_l, r_l, d_l, loss, batch_rnn_state, _ = sess.run([FPN.predicteed_observation, FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss, FPN.state_out, FPN.apply_grads], feed_dict=feed_dict)
+
+                history_container, next_container, reward_container, done_container = DAD(history_container, next_observations, reward_container, done_container, po)
+            
+
+                len_episode_buffer = len(past_history[sudo_data_index])
+
+                acc_loss += loss / len_episode_buffer
+                acc_o_l += o_l / len_episode_buffer
+                acc_r_l += r_l / len_episode_buffer
+                acc_d_l += d_l / len_episode_buffer
+
+                
+
+            epoch_loss.append(acc_loss / pred_step)
+            epoch_ob_loss.append(acc_o_l / pred_step)
+            epoch_reward_loss.append(acc_r_l / pred_step)
+            epoch_done_loss.append(acc_d_l / pred_step)
 
 
         if epoch % 5 == 0 and epoch != 0:
@@ -272,13 +304,13 @@ with tf.device("/gpu:0"):
             d_l = np.mean(epoch_done_loss)
             print "training on the " + str(epoch) + " epoch and the error is :" 
             print l, o_l, r_l, d_l
-            summary.value.add(tag='Losses/Prediction Loss', simple_value=float(l))
-            summary.value.add(tag='Losses/Observation Loss', simple_value=float(o_l))
-            summary.value.add(tag='Losses/Reward Loss', simple_value=float(r_l))
-            summary.value.add(tag='Losses/Done Loss', simple_value=float(d_l))
-            summary_writer = tf.summary.FileWriter("train_FPN")
-            summary_writer.add_summary(summary, epoch)
-            summary_writer.flush()
+            #summary.value.add(tag='Losses/Prediction Loss', simple_value=float(l))
+            #summary.value.add(tag='Losses/Observation Loss', simple_value=float(o_l))
+            #summary.value.add(tag='Losses/Reward Loss', simple_value=float(r_l))
+            #summary.value.add(tag='Losses/Done Loss', simple_value=float(d_l))
+            #summary_writer = tf.summary.FileWriter("train_FPN")
+            #summary_writer.add_summary(summary, epoch)
+            #summary_writer.flush()
 
             #print out the validation error
 
@@ -293,20 +325,26 @@ with tf.device("/gpu:0"):
                 #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
                 #print 'training ' + str(data_index) + ' file'
                 sudo_data_index = data_index + train_data_size
-                feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index], FPN.state_in[0]:batch_rnn_state[0], FPN.state_in[1]:batch_rnn_state[1]}
+                acc_loss = 0
+                acc_o_l = 0
+                acc_r_l = 0
+                acc_d_l = 0
+                for j in range(pred_step):
+                    feed_dict = {FPN.inputs:past_history[sudo_data_index], FPN.true_observation:episode_next[sudo_data_index], FPN.true_reward:episode_reward[sudo_data_index], FPN.true_done:episode_done[sudo_data_index], FPN.state_in[0]:batch_rnn_state[0], FPN.state_in[1]:batch_rnn_state[1]}
 
-                o_l, r_l, d_l, loss, batch_rnn_state = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss, FPN.state_out], feed_dict=feed_dict)
+                    o_l, r_l, d_l, loss, batch_rnn_state = sess.run([FPN.observation_loss, FPN.reward_loss, FPN.done_loss, FPN.loss, FPN.state_out], feed_dict=feed_dict)
 
-                len_episode_buffer = len(past_history[sudo_data_index])
+                    len_episode_buffer = len(past_history[sudo_data_index])
 
-                loss /= len_episode_buffer
-                o_l /= len_episode_buffer
-                r_l /= len_episode_buffer
-                d_l /= len_episode_buffer
-                val_epoch_loss.append(loss)
-                val_epoch_ob_loss.append(o_l)
-                val_epoch_reward_loss.append(r_l)
-                val_epoch_done_loss.append(d_l)
+                    acc_loss += loss / len_episode_buffer
+                    acc_o_l += o_l / len_episode_buffer
+                    acc_r_l += r_l / len_episode_buffer
+                    acc_d_l += d_l / len_episode_buffer
+
+                val_epoch_loss.append(acc_loss / pred_step)
+                val_epoch_ob_loss.append(acc_o_l / pred_step)
+                val_epoch_reward_loss.append(acc_r_l / pred_step)
+                val_epoch_done_loss.append(acc_d_l / pred_step)
 
             l = np.mean(val_epoch_loss)
             o_l = np.mean(val_epoch_ob_loss)
