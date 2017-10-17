@@ -44,7 +44,7 @@ class FramePredictionNetwork(nn.Module):
 #        self.conv6 = nn.Conv2d(32, 32, 3, stride=1, padding=1)
 
 
-#        self.lstm = nn.LSTMCell(32 * 16 * 24, 256)
+        self.lstm = nn.LSTMCell(32 * 16 * 24, 512)
 
 
 
@@ -52,19 +52,22 @@ class FramePredictionNetwork(nn.Module):
 
         self.apply(weights_init)
 
-        self.fc1 = nn.Linear(32 * 16 * 24, 1280)
-        self.fc2 = nn.Linear(1280, 288)
+        self.fc1 = nn.Linear(512, 288)
+        #self.fc2 = nn.Linear(1280, 288)
 
-        self.fc2.weight.data = normalized_columns_initializer(
-            self.fc2.weight.data, 0.1)
+        #self.fc2.weight.data = normalized_columns_initializer(
+        #    self.fc2.weight.data, 0.1)
 
-#        self.lstm.bias_ih.data.fill_(0)
-#        self.lstm.bias_hh.data.fill_(0)
+        self.lstm.bias_ih.data.fill_(0)
+        self.lstm.bias_hh.data.fill_(0)
 
         self.train()
 
 
-    def forward(self, x):
+    def forward(self, inputs):
+        x, (hx, cx) = inputs
+
+        hx, cx = hx.cuda(), cx.cuda()
 
         x = F.elu(self.conv1(x))
         x = F.elu(self.conv2(x))
@@ -73,14 +76,14 @@ class FramePredictionNetwork(nn.Module):
 #        x = F.elu(self.conv5(x))
 #        x = F.elu(self.conv6(x))
 
-
         x = x.view(-1, 32 * 16 * 24)
 
-#        hx, cx = self.lstm(x, (hx, cx))
 
-        x = F.elu(self.fc1(x))
-        x = F.elu(self.fc2(x))
-        return x
+        hx, cx = self.lstm(x, (hx, cx))
+
+        x = F.elu(self.fc1(hx))
+#        x = F.elu(self.fc2(x))
+        return x, (hx, cx)
 
 
 
@@ -92,10 +95,10 @@ retro_step = 3
 FPN = FramePredictionNetwork()
 FPN.cuda()
 num_epochs = 50
-data_size = 500
-train_data_size = 400
+data_size = 100
+train_data_size = 90
 buff = 0
-test_data_size = 100
+test_data_size = 10
 data_path = 'PongFF/'
 
 def read_data(data_path, data_size, train_data_size, test_data_size):
@@ -202,7 +205,7 @@ def read_data(data_path, data_size, train_data_size, test_data_size):
 
     return past_history, episode_next, episode_reward, episode_done, train_data_size, test_data_size
 
-past_history, episode_next, _, _, train_data_size, test_data_size = read_data(data_path, data_size, train_data_size, test_data_size)
+past_history, episode_next, _, episode_done, train_data_size, test_data_size = read_data(data_path, data_size, train_data_size, test_data_size)
 
 
 
@@ -222,13 +225,28 @@ for epoch in range(num_epochs):
     epoch_ob_loss = []
     epoch_reward_loss = []
     epoch_done_loss = []
+
+    done = True
     
     for data_index in range(train_data_size):            
         #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
         #print 'training ' + str(data_index) + ' file'
+
+        if done:
+            #model.load_state_dict(shared_model.state_dict())
+            cx = Variable(torch.zeros(1, 512), volatile=False)
+            hx = Variable(torch.zeros(1, 512), volatile=False)
+
+        else:
+            cx = Variable(cx.data, volatile=False)
+            hx = Variable(hx.data, volatile=False)
+
+        total_loss = 0
+
+
         sudo_data_index = data_index
                 
-        optimizer.zero_grad()
+
 
         one_piece_past = past_history[sudo_data_index]
 
@@ -236,28 +254,37 @@ for epoch in range(num_epochs):
         one_piece_past = np.reshape(one_piece_past, (-1, 3, (retro_step + 1) * 4, 24))
         one_true_ob = episode_next[sudo_data_index]
 
-        
-        one_piece_past, one_true_ob = Variable(torch.FloatTensor(one_piece_past).cuda()), Variable(torch.FloatTensor(one_true_ob).cuda())
-        predicted_ob = FPN(one_piece_past)
+        batch_size = one_piece_past.shape[0]
 
-        
-            
-        ob_loss = loss_func(predicted_ob, one_true_ob)
+        for i in range(batch_size):
+            one_piece_past_v, one_true_ob_v = Variable(torch.FloatTensor(one_piece_past[i]).cuda(), requires_grad=True), Variable(torch.FloatTensor(one_true_ob[i]).cuda())
+#            one_piece_past_v, one_true_ob_v = Variable(torch.FloatTensor(one_piece_past[0])), Variable(torch.FloatTensor(one_true_ob[0]))
+            inputs = one_piece_past_v.unsqueeze(0), (hx, cx)
+            optimizer.zero_grad()        
+            predicted_ob, (hx, cx) = FPN(inputs)          
+            ob_loss = loss_func(predicted_ob, one_true_ob_v)
+            ob_loss.backward(retain_graph=True)
+            optimizer.step()
+            total_loss += ob_loss.cpu().data.numpy()
 
-        np.savetxt('a.txt', predicted_ob.cpu().data.numpy())
-        np.savetxt('b.txt', one_true_ob.cpu().data.numpy())
-        
+ 
+#        one_piece_past_v, one_true_ob_v = Variable(torch.FloatTensor(one_piece_past).cuda()), Variable(torch.FloatTensor(one_true_ob).cuda())
+#        one_piece_past_v, one_true_ob_v = Variable(torch.FloatTensor(one_piece_past[0])), Variable(torch.FloatTensor(one_true_ob[0]))
 
-#        f = open("test.txt", 'w')
-#        f.writelines(predicted_ob.cpu().data.numpy)
-#        f.writelines(one_true_ob.cpu().data.numpy)
+#        inputs = one_piece_past_v.unsqueeze(0), (hx, cx)
+#        predicted_ob, hs = FPN(inputs)          
+#        ob_loss = loss_func(predicted_ob, one_true_ob_v)
 
-#        print(predicted_ob.size(), one_true_ob.size(), np.linalg.norm(predicted_ob.cpu().data.numpy() - episode_next[sudo_data_index][0]), np.sqrt(ob_loss.cpu().data.numpy() * 288))
-                
-        ob_loss.backward()
-        optimizer.step()
 
-        epoch_ob_loss.append(ob_loss.data[0])
+
+               
+        done = episode_done[sudo_data_index][-1]
+#        ob_loss.backward()
+
+
+#        optimizer.step()
+
+        epoch_ob_loss.append(total_loss / batch_size)
 
         
 
@@ -270,22 +297,49 @@ for epoch in range(num_epochs):
         #print out the validation error
 
         val_epoch_ob_loss = []
+
+        done = True
+
+        total_loss = 0
         
         for data_index in range(test_data_size):            
             #print past_history.shape, next_observations.shape, rewards.shape, dones.shape
             #print 'training ' + str(data_index) + ' file'
+
+            if done:
+                #model.load_state_dict(shared_model.state_dict())
+                cx = Variable(torch.zeros(1, 512), volatile=True)
+                hx = Variable(torch.zeros(1, 512), volatile=True)
+            else:
+                cx = Variable(cx.data, volatile=True)
+                hx = Variable(hx.data, volatile=True)
+
+
             sudo_data_index = data_index + train_data_size
             
 
             one_piece_past = past_history[sudo_data_index]        
             one_piece_past = np.reshape(one_piece_past, (-1, 3, (retro_step + 1) * 4, 24))
             one_true_ob = episode_next[sudo_data_index]
-            one_piece_past, one_true_ob = Variable(torch.FloatTensor(one_piece_past).cuda()), Variable(torch.FloatTensor(one_true_ob).cuda())
-            predicted_ob = FPN(one_piece_past)
+
+            one_piece_past.shape[0]
+
+            total_loss = 0
+            for i in range(batch_size):
+                one_piece_past_v, one_true_ob_v = Variable(torch.FloatTensor(one_piece_past[i]).cuda()), Variable(torch.FloatTensor(one_true_ob[i]).cuda())
+#                one_piece_past_v, one_true_ob_v = Variable(torch.FloatTensor(one_piece_past[i])), Variable(torch.FloatTensor(one_true_ob[i]))
+                inputs = one_piece_past_v.unsqueeze(0), (hx, cx)
+                optimizer.zero_grad()        
+                predicted_ob, (hx, cx) = FPN(inputs)          
+                ob_loss = loss_func(predicted_ob, one_true_ob_v)
+                total_loss += ob_loss.cpu().data.numpy()
+#                ob_loss.backward(retain_graph=True)
+#                optimizer.step()
+
+               
+            done = episode_done[sudo_data_index][-1]
             
-            ob_loss = loss_func(predicted_ob, one_true_ob)
-            
-            val_epoch_ob_loss.append(ob_loss.data[0])
+            val_epoch_ob_loss.append(total_loss / batch_size)
 
 
         o_l = np.mean(val_epoch_ob_loss)
