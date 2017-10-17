@@ -44,7 +44,7 @@ class FramePredictionNetwork(nn.Module):
 #        self.conv6 = nn.Conv2d(32, 32, 3, stride=1, padding=1)
 
 
-        self.lstm = nn.LSTMCell(32 * 16 * 24, 256)
+#        self.lstm = nn.LSTMCell(32 * 16 * 24, 256)
 
 
 
@@ -58,14 +58,14 @@ class FramePredictionNetwork(nn.Module):
         self.fc2.weight.data = normalized_columns_initializer(
             self.fc2.weight.data, 0.1)
 
-        self.lstm.bias_ih.data.fill_(0)
-        self.lstm.bias_hh.data.fill_(0)
+#        self.lstm.bias_ih.data.fill_(0)
+#        self.lstm.bias_hh.data.fill_(0)
 
         self.train()
 
 
-    def forward(self, inputs):
-        x, (hx, cx) = inputs
+    def forward(self, x):
+
         x = F.elu(self.conv1(x))
         x = F.elu(self.conv2(x))
         x = F.elu(self.conv3(x))
@@ -76,10 +76,10 @@ class FramePredictionNetwork(nn.Module):
 
         x = x.view(-1, 32 * 16 * 24)
 
-        hx, cx = self.lstm(x, (hx, cx))
+#        hx, cx = self.lstm(x, (hx, cx))
 
         x = F.elu(self.fc1(x))
-#        x = F.elu(self.fc2(x))
+        x = F.elu(self.fc2(x))
         return x
 
 
