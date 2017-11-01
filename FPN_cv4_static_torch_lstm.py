@@ -44,7 +44,7 @@ class FramePredictionNetwork(nn.Module):
 #        self.conv6 = nn.Conv2d(32, 32, 3, stride=1, padding=1)
 
 
-        self.lstm = nn.LSTMCell(32 * 16 * 24, 512)
+        self.lstm = nn.LSTMCell(32 * 16 * 24, lstm_hid_size)
 
 
 
@@ -52,7 +52,7 @@ class FramePredictionNetwork(nn.Module):
 
         self.apply(weights_init)
 
-        self.fc1 = nn.Linear(512, 288)
+        self.fc1 = nn.Linear(lstm_hid_size, 288)
         #self.fc2 = nn.Linear(1280, 288)
 
         #self.fc2.weight.data = normalized_columns_initializer(
@@ -99,6 +99,7 @@ data_size = 100
 train_data_size = 90
 buff = 0
 test_data_size = 10
+lstm_hid_size = 1024
 data_path = 'PongFF/'
 
 def read_data(data_path, data_size, train_data_size, test_data_size):
@@ -234,8 +235,8 @@ for epoch in range(num_epochs):
 
         if done:
             #model.load_state_dict(shared_model.state_dict())
-            cx = Variable(torch.zeros(1, 512), volatile=False)
-            hx = Variable(torch.zeros(1, 512), volatile=False)
+            cx = Variable(torch.zeros(1, lstm_hid_size), volatile=False)
+            hx = Variable(torch.zeros(1, lstm_hid_size), volatile=False)
 
         else:
             cx = Variable(cx.data, volatile=False)
@@ -308,8 +309,8 @@ for epoch in range(num_epochs):
 
             if done:
                 #model.load_state_dict(shared_model.state_dict())
-                cx = Variable(torch.zeros(1, 512), volatile=True)
-                hx = Variable(torch.zeros(1, 512), volatile=True)
+                cx = Variable(torch.zeros(1, lstm_hid_size), volatile=True)
+                hx = Variable(torch.zeros(1, lstm_hid_size), volatile=True)
             else:
                 cx = Variable(cx.data, volatile=True)
                 hx = Variable(hx.data, volatile=True)
